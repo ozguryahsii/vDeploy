@@ -183,6 +183,7 @@
         ctx.restore();
       },
     };
+    const rowOf = (item) => (item.raw && item.raw.row) || rows[item.dataIndex];
     const colorFor = (r) => (r.outside ? css('--s2') : css('--s1'));
     charts.push(new Chart(document.getElementById('timeline'), {
       plugins: [bandPlugin],
@@ -191,7 +192,7 @@
         datasets: [
           { type: 'bar', label: 'Talep süresi', data: bars, backgroundColor: rows.map(colorFor), borderRadius: 4,
             borderSkipped: false, barPercentage: 0.6, categoryPercentage: 0.9, order: 2 },
-          { type: 'scatter', label: 'Planlanan deploy', data: rows.map((r) => (r.planned ? { x: r.planned, y: r.key } : null)),
+          { type: 'scatter', label: 'Planlanan deploy', data: rows.filter((r) => r.planned).map((r) => ({ x: r.planned, y: r.key, row: r })),
             pointStyle: 'rectRot', pointRadius: 6, pointHoverRadius: 8, backgroundColor: css('--ink'),
             borderColor: css('--surface'), borderWidth: 2, order: 1 },
         ],
@@ -209,9 +210,9 @@
           y: { type: 'category', labels, grid: { display: false }, border: axis },
         },
         plugins: { tooltip: { callbacks: {
-          title: (it) => { const r = rows[it[0].dataIndex]; return `${r.key} · ${r.summary}`; },
+          title: (it) => { const r = rowOf(it[0]); return `${r.key} · ${r.summary}`; },
           label: (c) => {
-            const r = rows[c.dataIndex];
+            const r = rowOf(c);
             return [
               r.app ? `Uygulama: ${r.app}` : `Tip: ${r.type}`,
               `Açılış: ${fmtDate(r.created)}`,
@@ -222,7 +223,7 @@
           },
           footer: () => (R.interactive ? 'Talep detayı için tıklayın' : ''),
         } } },
-        ...onClick((el, probe) => (probe ? true : `/changes/${rows[el.index].id}`)),
+        ...onClick((el, probe) => (probe ? true : `/changes/${(el.element.$context.raw.row || rows[el.index]).id}`)),
       },
     }));
     legend('timeline', [['Pencere içinde planlanan', css('--s1')], ['Pencere dışında planlanan', css('--s2')],
@@ -230,29 +231,32 @@
   }
 
   // ---------- çizim ----------
-  timeline();
+  // Her grafik ayrı çizilir; birinde hata olursa diğerleri etkilenmez.
+  const safe = (name, fn) => { try { fn(); } catch (e) { console.error(`Grafik çizilemedi (${name}):`, e);
+    const b = document.getElementById(name + 'Box'); if (b) b.innerHTML = '<p class="muted">Bu grafik çizilemedi.</p>'; } };
+  safe('timeline', timeline);
 
-  donut('shareWindow', [
+  safe('shareWindow', () => donut('shareWindow', [
     { label: 'Pencere içi', value: R.share_window[0], color: css('--s1'), only: 'inside' },
     { label: 'Pencere dışı', value: R.share_window[1], color: css('--s2'), only: 'outside' },
     { label: 'Tarihsiz', value: R.share_window[2], color: css('--axis'), optional: true },
-  ], 'pencere içi', (p) => (p.only ? { only: p.only } : null));
-  donut('shareStatus', [
+  ], 'pencere içi', (p) => (p.only ? { only: p.only } : null)));
+  safe('shareStatus', () => donut('shareStatus', [
     { label: 'Kapalı', value: R.share_status[0], color: css('--s3') },
     { label: 'Açık', value: R.share_status[1], color: css('--s4'), only: 'open' },
-  ], 'kapalı', (p) => (p.only ? { only: p.only } : null));
+  ], 'kapalı', (p) => (p.only ? { only: p.only } : null)));
 
-  insideOutside('days', DAYS_S, R.days, (i) => DAYS[i], (i) => ({ dow: i }));
-  insideOutside('hours', R.hours.map((_, h) => pad2(h)), R.hours, (h) => `${pad2(h)}:00–${pad2(h)}:59`, (h) => ({ hour: h }));
+  safe('days', () => insideOutside('days', DAYS_S, R.days, (i) => DAYS[i], (i) => ({ dow: i })));
+  safe('hours', () => insideOutside('hours', R.hours.map((_, h) => pad2(h)), R.hours, (h) => `${pad2(h)}:00–${pad2(h)}:59`, (h) => ({ hour: h })));
 
-  hbar('risks', R.risks, 'only', { total: R.timeline.length, colors: R.risks.map(() => css('--s2')),
-    toParams: (r) => ({ only: r.only }) });
-  hbar('requestType', R.request_type, 'request_type');
-  hbar('application', R.application, 'application');
-  hbar('microservice', R.microservice, 'microservice');
-  hbar('department', R.department, 'department', { maxLabel: 18 });
-  hbar('requester', R.requester, 'requester', { maxLabel: 18 });
-  hbar('assignee', R.assignee, 'assignee', { maxLabel: 18 });
+  safe('risks', () => hbar('risks', R.risks, 'only', { total: R.timeline.length, colors: R.risks.map(() => css('--s2')),
+    toParams: (r) => ({ only: r.only }) }));
+  safe('requestType', () => hbar('requestType', R.request_type, 'request_type'));
+  safe('application', () => hbar('application', R.application, 'application'));
+  safe('microservice', () => hbar('microservice', R.microservice, 'microservice'));
+  safe('department', () => hbar('department', R.department, 'department', { maxLabel: 18 }));
+  safe('requester', () => hbar('requester', R.requester, 'requester', { maxLabel: 18 }));
+  safe('assignee', () => hbar('assignee', R.assignee, 'assignee', { maxLabel: 18 }));
 
   function vbar(id, rows, colors, footer, paramsFn) {
     const total = rows.reduce((a, r) => a + r.value, 0);
@@ -273,11 +277,12 @@
       },
     }));
   }
-  vbar('lead', R.lead_buckets, R.lead_buckets.map((_, i) => css(i === 0 ? '--s2' : '--s1')),
-    (i) => (i === 0 ? 'Deploy tarihi, talebin açılışından önce' : ''), (i) => ({ lead: R.lead_buckets[i].label }));
-  vbar('resolution', R.resolution_buckets, css('--s1'), () => '', null);
+  safe('lead', () => vbar('lead', R.lead_buckets, R.lead_buckets.map((_, i) => css(i === 0 ? '--s2' : '--s1')),
+    (i) => (i === 0 ? 'Deploy tarihi, talebin açılışından önce' : ''), (i) => ({ lead: R.lead_buckets[i].label })));
+  safe('resolution', () => vbar('resolution', R.resolution_buckets, css('--s1'), () => '', null));
 
   // Son 8 hafta: seçili hafta tam renk, diğerleri soluk
+  safe('trend', () => {
   const T = R.trend;
   const current = T.week_starts.indexOf(R.week_start);
   const fade = (c, i) => (i === current ? c : c + '66');
@@ -300,6 +305,7 @@
     },
   }));
   legend('trend', [['Pencere içi', css('--s1')], ['Pencere dışı', css('--s2')]]);
+  });
 
   // PDF/yazdırmada grafikler sayfa genişliğine uysun
   window.addEventListener('beforeprint', () => charts.forEach((c) => c.resize()));
