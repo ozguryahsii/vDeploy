@@ -56,6 +56,7 @@
     {{ secret('jira.pat', 'Personal Access Token') }}
     <div class="note">Token: Jira'da profil → <b>Personal Access Tokens</b> → Create token. Okuma yetkisi olan bir servis kullanıcısıyla oluşturulması önerilir.</div>
     <div class="field"><label for="jira.jql">Haftalık çekim için JQL</label>
+      <div class="muted small" style="margin-bottom:6px">Jira'da “Talep Tipi” olarak görünen alan JQL'de <code>issuetype</code> diye yazılır. Örnek: <code>project = SAY AND issuetype = "Deployment Talebi" AND updated &gt;= -8d</code></div>
       <textarea id="jira.jql" name="jira.jql" style="min-height:70px">{{ v['jira.jql'] }}</textarea></div>
     {{ inp('jira.closed_statuses', 'Kapalı sayılan durumlar', help='Virgülle ayırın. Bu durumlardaki talepler “kapalı” sayılır.') }}
     {{ chk('jira.verify_ssl', 'SSL sertifikasını doğrula') }}
@@ -65,6 +66,12 @@
     <h2>Bağlantı testi</h2>
     <p class="muted">Kayıtlı adres ve token ile <code>/rest/api/2/myself</code> çağrılır.</p>
     <button class="btn" type="submit">Bağlantıyı test et</button>
+  </form>
+  <form class="card" method="post" action="/settings/jira/test-jql" style="align-self:start">
+    <h2>JQL testi</h2>
+    <p class="muted">Sorgu Jira'da çalıştırılır, kaç kayıt döndüğü gösterilir; veri aktarılmaz. Boş bırakılırsa kayıtlı sorgu denenir.</p>
+    <div class="field"><textarea name="jql" style="min-height:70px" placeholder="{{ v['jira.jql'] }}"></textarea></div>
+    <button class="btn" type="submit">JQL'i test et</button>
   </form>
 </div>
 

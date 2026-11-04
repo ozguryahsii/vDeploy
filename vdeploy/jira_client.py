@@ -44,8 +44,27 @@ def issue_to_fields(issue: dict, names: dict[str, str]) -> dict[str, list[str]]:
     return fields
 
 
+def describe_error(exc: Exception) -> str:
+    """Jira'nın 4xx yanıtındaki açıklamayı (errorMessages / errors) okunur hale getirir."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        r = exc.response
+        detail = ""
+        try:
+            body = r.json()
+            msgs = list(body.get("errorMessages") or []) + [f"{k}: {v}" for k, v in (body.get("errors") or {}).items()]
+            detail = " ".join(msgs)
+        except ValueError:
+            detail = r.text[:300]
+        hints = {401: "Token geçersiz ya da süresi dolmuş.", 403: "Bu kullanıcının yetkisi yok.",
+                 404: "Adres yanlış olabilir (Jira adresi ayarını kontrol edin)."}
+        return f"Jira {r.status_code} döndürdü: {detail or hints.get(r.status_code, r.reason_phrase)}"
+    if isinstance(exc, httpx.ConnectError):
+        return f"Jira'ya bağlanılamadı: {exc}"
+    return f"{type(exc).__name__}: {exc}"
+
+
 class JiraClient:
-    def __init__(self, base_url: str, pat: str, verify: bool = True, timeout: float = 30.0):
+    def __init__(self, base_url: str, pat: str, verify: bool = True, timeout: float = 30.0, transport=None):
         if not base_url or not pat:
             raise ValueError("Jira adresi ve Personal Access Token tanımlı olmalı (Ayarlar > Jira).")
         self.client = httpx.Client(
@@ -53,12 +72,18 @@ class JiraClient:
             headers={"Authorization": f"Bearer {pat}", "Accept": "application/json"},
             verify=verify,
             timeout=timeout,
+            transport=transport,
         )
 
     def myself(self) -> dict:
         r = self.client.get("/rest/api/2/myself")
         r.raise_for_status()
         return r.json()
+
+    def count(self, jql: str) -> int:
+        r = self.client.get("/rest/api/2/search", params={"jql": jql, "maxResults": 0})
+        r.raise_for_status()
+        return int(r.json().get("total", 0))
 
     def search(self, jql: str):
         start = 0
@@ -103,7 +128,7 @@ def sync(db: Session, jql: str | None = None) -> SyncLog:
     except Exception as exc:  # ekranda ve logda gösterilsin
         db.rollback()
         log.ok = False
-        log.message = f"{type(exc).__name__}: {exc}"
+        log.message = describe_error(exc)
     db.add(log)
     db.commit()
     return log

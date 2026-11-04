@@ -505,7 +505,19 @@ def settings_jira_test(request: Request, db: Session = Depends(get_db)):
         me = jira_client.client_from_settings(settings_store.get_all(db)).myself()
         flash(request, f"Jira bağlantısı başarılı: {me.get('displayName') or me.get('name')}")
     except Exception as exc:
-        flash(request, f"Jira bağlantısı başarısız: {exc}", "error")
+        flash(request, f"Jira bağlantısı başarısız. {jira_client.describe_error(exc)}", "error")
+    return back("/settings?tab=jira")
+
+
+@app.post("/settings/jira/test-jql")
+def settings_jira_test_jql(request: Request, jql: str = Form(""), db: Session = Depends(get_db)):
+    values = settings_store.get_all(db)
+    jql = jql.strip() or values["jira.jql"]
+    try:
+        total = jira_client.client_from_settings(values).count(jql)
+        flash(request, f"JQL geçerli: {total} kayıt dönüyor.")
+    except Exception as exc:
+        flash(request, f"JQL çalışmadı. {jira_client.describe_error(exc)}", "error")
     return back("/settings?tab=jira")
 
 

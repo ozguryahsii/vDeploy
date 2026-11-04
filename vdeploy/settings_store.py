@@ -16,7 +16,7 @@ DEFAULTS: dict[str, str] = {
     # Jira (Data Center / Server)
     "jira.base_url": "",
     "jira.pat": "",
-    "jira.jql": 'project = SAY AND "Talep Tipi" = "Deployment Talebi" AND updated >= -8d',
+    "jira.jql": 'project = SAY AND issuetype = "Deployment Talebi" AND updated >= -8d ORDER BY created ASC',
     "jira.verify_ssl": "1",
     "jira.closed_statuses": "Kapalı,Closed,Done,Çözüldü,Resolved,Tamamlandı",
     "jira.auto_sync": "0",
