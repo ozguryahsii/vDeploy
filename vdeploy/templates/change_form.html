@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Yeni talep' if is_new else (c.jira_key or 'Talep') }}{% endblock %}
+{% macro inp(name, label, value, type='text', required=False) -%}
+<div class="field"><label for="{{ name }}">{{ label }}</label>
+<input id="{{ name }}" name="{{ name }}" type="{{ type }}" value="{{ value if value is not none else '' }}" {{ 'required' if required }} {{ 'disabled' if not editable }}></div>
+{%- endmacro %}
+{% macro yn(name, label, value) -%}
+<div class="field"><label for="{{ name }}">{{ label }}</label>
+<select id="{{ name }}" name="{{ name }}" {{ 'disabled' if not editable }}>
+  <option value="" {{ 'selected' if value is none }}>—</option>
+  <option value="1" {{ 'selected' if value == true }}>Evet</option>
+  <option value="0" {{ 'selected' if value == false }}>Hayır</option>
+</select></div>
+{%- endmacro %}
+{% set dtl = '%Y-%m-%dT%H:%M' %}
+{% block content %}
+<p><a href="/changes">← Talepler</a></p>
+<h1>{% if is_new %}Yeni deployment talebi{% else %}{{ c.jira_key or ('Talep #' ~ c.id) }}{% endif %}</h1>
+<p class="sub">
+  {% if is_new %}Jira dışında gelen talepleri buradan girebilirsiniz.
+  {% elif not editable %}Bu kayıt Jira'dan geldi ({{ c.source }}); alanlar her senkronda Jira'dan güncellenir. Sonuç ve not alanları uygulamada tutulur.
+  {% else %}Elle girilmiş kayıt.{% endif %}
+</p>
+{% for e in errors or [] %}<div class="flash error">{{ e }}</div>{% endfor %}
+
+{% if not is_new %}
+<div class="kpis">
+  <div class="kpi"><div class="label">Planlama süresi</div><div class="value">{{ lead|hours }}</div><div class="delta">Açılış → planlanan deploy</div></div>
+  <div class="kpi"><div class="label">Çözüm süresi</div><div class="value">{{ resolution|hours }}</div><div class="delta">Açılış → çözüm</div></div>
+  <div class="kpi"><div class="label">Bakım penceresi</div><div class="value" style="font-size:18px">{% if c.deploy_planned or c.resolved %}{{ 'Dışında' if outside else 'İçinde' }}{% else %}—{% endif %}</div><div class="delta">&nbsp;</div></div>
+  <div class="kpi"><div class="label">Durum</div><div class="value" style="font-size:18px">{{ c.status or '—' }}</div><div class="delta">{{ 'Kapalı' if c.is_closed else 'Açık' }}</div></div>
+</div>
+{% endif %}
+
+<form method="post" action="{{ '/changes/new' if is_new else '/changes/' ~ c.id }}">
+  <div class="card">
+    <h2>Sonuç (uygulamada tutulur)</h2>
+    <div class="form-grid">
+      <div class="field"><label for="outcome">Deployment sonucu</label>
+        <select id="outcome" name="outcome">{% for k, v in OUTCOMES.items() %}<option value="{{ k }}" {{ 'selected' if c.outcome == k }}>{{ v }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="field"><label for="notes">Not</label><textarea id="notes" name="notes">{{ c.notes or '' }}</textarea></div>
+  </div>
+
+  <div class="card">
+    <h2>Talep bilgileri</h2>
+    <div class="form-grid">
+      {{ inp('jira_key', 'Jira anahtarı (varsa)', c.jira_key) }}
+      <div class="field" style="grid-column: span 2"><label for="summary">Özet</label>
+        <input id="summary" name="summary" value="{{ c.summary or '' }}" required {{ 'disabled' if not editable }}></div>
+      <div class="field"><label for="request_type">Talep tipi</label>
+        <input id="request_type" name="request_type" list="types" value="{{ c.request_type or '' }}" {{ 'disabled' if not editable }}>
+        <datalist id="types">{% for t in types %}<option value="{{ t }}">{% endfor %}</datalist></div>
+      {{ inp('application', 'Uygulama', c.application) }}
+      {{ inp('microservices', 'Mikroservisler (virgülle)', c.microservices) }}
+      {{ inp('requester', 'Talep eden', c.requester) }}
+      {{ inp('department', 'Departman', c.department) }}
+      {{ inp('assignee', 'Uygulayan', c.assignee) }}
+      {{ inp('created', 'Oluşturma', c.created.strftime(dtl) if c.created, 'datetime-local', True) }}
+      {{ inp('deploy_planned', 'Planlanan deploy', c.deploy_planned.strftime(dtl) if c.deploy_planned, 'datetime-local') }}
+      {{ inp('resolved', 'Çözüm', c.resolved.strftime(dtl) if c.resolved, 'datetime-local') }}
+      {{ inp('status', 'Durum', c.status) }}
+      {{ inp('tag', 'Tag / versiyon', c.tag) }}
+      {{ inp('database', 'Veritabanı', c.database) }}
+      {{ inp('db_type', 'Veritabanı tipi', c.db_type) }}
+      {{ yn('db_structural_change', 'DB yapısal değişiklik?', c.db_structural_change) }}
+      {{ yn('pre_test_possible', 'Deploy öncesi test yapılabilir?', c.pre_test_possible) }}
+      {{ yn('post_test_possible', 'Deploy sonrası test yapılabilir?', c.post_test_possible) }}
+      {{ inp('vendor', 'Vendor', c.vendor) }}
+      {{ inp('vendor_ticket', 'Vendor ticket', c.vendor_ticket) }}
+      {{ inp('emergency_reason', 'Acil nedeni', c.emergency_reason) }}
+    </div>
+    <label class="check"><input type="checkbox" name="is_emergency" value="1" {{ 'checked' if c.is_emergency }} {{ 'disabled' if not editable }}> Acil / kritik deployment</label>
+    <label class="check"><input type="checkbox" name="is_closed" value="1" {{ 'checked' if c.is_closed }} {{ 'disabled' if not editable }}> Kapalı</label>
+  </div>
+
+  <div class="actions" style="margin-top:16px">
+    <button class="btn primary" type="submit">Kaydet</button>
+    <a class="btn" href="/changes">Vazgeç</a>
+  </div>
+</form>
+{% if not is_new %}
+<form method="post" action="/changes/{{ c.id }}/delete" style="margin-top:24px" onsubmit="return confirm('Bu talep silinsin mi?')">
+  <button class="btn danger" type="submit">Talebi sil</button>
+</form>
+{% endif %}
+{% endblock %}

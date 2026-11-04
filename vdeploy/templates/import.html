@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Veri Aktarımı{% endblock %}
+{% block content %}
+<h1>Veri aktarımı</h1>
+<p class="sub">Veritabanında {{ total }} talep var. Aynı Jira anahtarı tekrar gelirse kayıt güncellenir; uygulamada girilen sonuç ve notlar korunur.</p>
+<div class="grid g2">
+  <div class="card">
+    <h2>Jira CSV yükle</h2>
+    <p class="muted">Jira'da filtreyi açın → <b>Dışa aktar → CSV (Tüm alanlar)</b>. Türkçe ve İngilizce başlıklar tanınır.</p>
+    <form method="post" action="/import/csv" enctype="multipart/form-data" class="actions">
+      <input type="file" name="file" accept=".csv,text/csv" required>
+      <button class="btn primary" type="submit">Yükle</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Jira'dan çek (REST API)</h2>
+    {% if jira_ready %}
+    <form method="post" action="/import/jira">
+      <div class="field"><label for="jql">JQL (boş bırakılırsa ayarlardaki sorgu kullanılır)</label>
+        <input id="jql" name="jql" placeholder="{{ values['jira.jql'] }}" style="width:100%"></div>
+      <button class="btn primary" type="submit">Şimdi senkronize et</button>
+    </form>
+    {% else %}
+    <p class="muted">Jira bağlantısı henüz tanımlı değil.</p>
+    <a class="btn" href="/settings?tab=jira">Jira ayarları</a>
+    {% endif %}
+  </div>
+</div>
+<div class="card" style="margin-top:16px">
+  <h2>Son işlemler</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Zaman</th><th>Tür</th><th>Durum</th><th class="num">Yeni</th><th class="num">Güncellenen</th><th>Mesaj</th></tr></thead>
+    <tbody>
+    {% for l in logs %}
+      <tr><td style="white-space:nowrap">{{ l.at|dt }}</td><td>{{ {'csv':'CSV','jira':'Jira','mail':'E-posta'}.get(l.kind, l.kind) }}</td>
+        <td><span class="tag {{ 'good' if l.ok else 'critical' }}">{{ 'Başarılı' if l.ok else 'Hata' }}</span></td>
+        <td class="num">{{ l.inserted }}</td><td class="num">{{ l.updated }}</td><td>{{ l.message }}</td></tr>
+    {% else %}<tr><td colspan="6" class="muted">Henüz işlem yok.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

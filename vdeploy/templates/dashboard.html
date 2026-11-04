@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% macro kpi(label, value, prev=None, unit='', fmt='num', better='down', hint='') -%}
+<div class="kpi" {% if hint %}title="{{ hint }}"{% endif %}>
+  <div class="label">{{ label }}</div>
+  <div class="value">{% if fmt == 'hours' %}{{ value|hours }}{% else %}{{ value|num }}{% if unit and value is not none %}<small>{{ unit }}</small>{% endif %}{% endif %}</div>
+  {% if compare and prev is not none and value is not none %}
+    {% set d = (value - prev) %}
+    <div class="delta">Önceki dönem: {% if fmt == 'hours' %}{{ prev|hours }}{% else %}{{ prev|num }}{{ unit }}{% endif %}
+      {% if d > 0 %}<span class="up">{{ d|round(1)|num }}</span>{% elif d < 0 %}<span class="down">{{ (-d)|round(1)|num }}</span>{% endif %}</div>
+  {% else %}<div class="delta">&nbsp;</div>{% endif %}
+</div>
+{%- endmacro %}
+{% block content %}
+<div class="chart-head" style="margin-bottom:12px">
+  <div>
+    <h1>Deployment Dashboard</h1>
+    <p class="sub" style="margin:0">{{ period.start|dt('%d.%m.%Y') }} – {{ period.end|dt('%d.%m.%Y') }} · Bakım penceresi: {{ window.describe() }}</p>
+  </div>
+  <a class="btn no-print" href="/changes/new">+ Yeni talep</a>
+</div>
+
+{% if not has_data %}
+<div class="card empty">
+  <h2>Henüz kayıt yok</h2>
+  <p>Jira'dan aldığınız CSV export'unu yükleyin ya da Jira bağlantısını kurup senkronize edin.</p>
+  <p><a class="btn primary" href="/import">Veri aktar</a> <a class="btn" href="/changes/new">Elle talep gir</a></p>
+</div>
+{% else %}
+<form class="filters" method="get" action="/">
+  <div class="seg">
+    {% for key, (label, _) in presets.items() %}
+      <a class="{{ 'on' if range == key }}" href="?range={{ key }}&request_type={{ filters.request_type|urlencode }}&department={{ filters.department|urlencode }}&application={{ filters.application|urlencode }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <input type="hidden" name="range" value="{{ range }}">
+  {% for name, label in [('request_type','Tüm talep tipleri'),('department','Tüm departmanlar'),('application','Tüm uygulamalar')] %}
+  <select name="{{ name }}" onchange="this.form.submit()" aria-label="{{ label }}">
+    <option value="">{{ label }}</option>
+    {% for o in options[name] %}<option {{ 'selected' if filters[name] == o }}>{{ o }}</option>{% endfor %}
+  </select>
+  {% endfor %}
+  <span class="muted" style="margin-left:auto">Özel aralık:</span>
+  <input type="date" name="start" value="{{ period.start.isoformat() if range == 'custom' }}" aria-label="Başlangıç">
+  <input type="date" name="end" value="{{ period.end.isoformat() if range == 'custom' }}" aria-label="Bitiş">
+  <button class="btn" type="submit">Uygula</button>
+</form>
+
+<div class="kpis">
+  {{ kpi('Toplam talep', summary.total, previous.total) }}
+  {{ kpi('Bakım penceresi dışı', summary.outside_window, previous.outside_window, hint='Planlanan deploy zamanı bakım penceresine düşmeyen talepler') }}
+  {{ kpi('Pencere dışı oranı', summary.outside_window_rate, previous.outside_window_rate, unit='%') }}
+  {{ kpi('Acil / kritik', summary.emergency, previous.emergency) }}
+  {{ kpi('Medyan planlama süresi', summary.median_lead_hours, previous.median_lead_hours, fmt='hours', hint='Talebin açılmasından planlanan deploy zamanına kadar geçen süre') }}
+  {{ kpi('Medyan çözüm süresi', summary.median_resolution_hours, previous.median_resolution_hours, fmt='hours', hint='Talebin açılmasından Jira’da çözülmesine kadar geçen süre') }}
+  {{ kpi('Geriye dönük kayıt', summary.retroactive, previous.retroactive, hint='Deploy tarihi talep açılışından önce olan kayıtlar') }}
+  {{ kpi('Açık talep', summary.open, previous.open) }}
+</div>
+
+<div class="card">
+  <div class="chart-head"><h2>Haftalık talep sayısı · talep tipine göre</h2><span class="hint">Hafta başlangıcı (Pazartesi)</span></div>
+  <div class="legend" id="weeklyLegend"></div>
+  <div class="chart-box tall"><canvas id="weekly" role="img" aria-label="Haftalık talep sayısı, talep tipine göre yığılmış"></canvas></div>
+</div>
+
+<div class="grid g2" style="margin-top:16px">
+  <div class="card">
+    <div class="chart-head"><h2>Bakım penceresi uyumu</h2><span class="hint">{{ window.describe() }}</span></div>
+    <div class="legend"><span><i style="background:var(--s1)"></i>Pencere içi</span><span><i style="background:var(--s2)"></i>Pencere dışı</span></div>
+    <div class="chart-box"><canvas id="windowChart" role="img" aria-label="Haftalık pencere içi ve dışı deploy sayısı"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="chart-head"><h2>Deploy zamanı yoğunluğu</h2><span class="hint">Gün × saat · kesikli çerçeve = bakım penceresi</span></div>
+    <div class="heat" id="heat"></div>
+    <div class="heat-legend">Az <i style="background:var(--seq-1)"></i><i style="background:var(--seq-2)"></i><i style="background:var(--seq-3)"></i><i style="background:var(--seq-4)"></i><i style="background:var(--seq-5)"></i><i style="background:var(--seq-6)"></i> Çok</div>
+  </div>
+</div>
+
+<div class="grid g2" style="margin-top:16px">
+  <div class="card"><h2>Uygulama bazında (ilk 10)</h2><div class="chart-box"><canvas id="application"></canvas></div></div>
+  <div class="card"><h2>Mikroservis bazında (ilk 10)</h2><div class="chart-box"><canvas id="microservice"></canvas></div></div>
+  <div class="card"><h2>Talep tipi</h2><div class="chart-box"><canvas id="request_type"></canvas></div></div>
+  <div class="card">
+    <div class="chart-head"><h2>Planlama süresi dağılımı</h2><span class="hint">Talep açılışı → planlanan deploy</span></div>
+    <div class="chart-box"><canvas id="lead_buckets"></canvas></div>
+  </div>
+  <div class="card"><h2>Talep eden departman</h2><div class="chart-box"><canvas id="department"></canvas></div></div>
+  <div class="card"><h2>Uygulayan (Atanan)</h2><div class="chart-box"><canvas id="assignee"></canvas></div></div>
+</div>
+
+<div class="grid g3" style="margin-top:16px">
+  <div class="kpi"><div class="label">DB yapısal değişiklik</div><div class="value">{{ summary.db_structural }}</div><div class="delta">Veritabanında yapısal değişiklik içeren talep</div></div>
+  <div class="kpi"><div class="label">Test yapılamayan</div><div class="value">{{ summary.no_pre_test }}<small>öncesi</small> · {{ summary.no_post_test }}<small>sonrası</small></div><div class="delta">“Test yapılabilir?” = Hayır</div></div>
+  <div class="kpi"><div class="label">Değişiklik başarısızlık oranı</div>
+    <div class="value">{% if summary.change_failure_rate is not none %}{{ summary.change_failure_rate|num }}<small>%</small>{% else %}—{% endif %}</div>
+    <div class="delta">{% if summary.outcome_judged %}Sonucu girilen {{ summary.outcome_judged }} talep üzerinden{% else %}Talepler ekranından sonuç girildikçe hesaplanır{% endif %}</div></div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div class="chart-head"><h2>Dikkat çeken talepler</h2><a href="/changes?only=outside" class="hint">Tümünü gör →</a></div>
+  {% if notable %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Jira</th><th>Özet</th><th>Tip</th><th>Uygulama</th><th>Planlanan deploy</th><th>Neden</th></tr></thead>
+    <tbody>
+    {% for n in notable %}{% set c = n.change %}
+      <tr>
+        <td style="white-space:nowrap"><a href="/changes/{{ c.id }}">{{ c.jira_key or ('#' ~ c.id) }}</a></td>
+        <td>{{ c.summary }}</td><td>{{ c.request_type }}</td><td>{{ c.application or '—' }}</td>
+        <td style="white-space:nowrap">{{ c.deploy_planned|dt }}</td>
+        <td>{% for r in n.reasons %}<span class="tag {{ 'critical' if r in ('Acil','Başarısız','Geri alındı') else 'serious' }}">{{ r }}</span>{% endfor %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="muted">Bu aralıkta dikkat çeken talep yok.</p>{% endif %}
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if has_data %}
+<script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
+<script>
+  window.VDEPLOY = {{ bd_json|safe }};
+  window.VDEPLOY_WINDOW = {{ {'days': window.days|list, 'start': window.start.hour, 'end': window.end.hour}|tojson }};
+</script>
+<script src="{{ url_for('static', path='dashboard.js') }}?v={{ version }}"></script>
+{% endif %}
+{% endblock %}

@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-from .config import get_settings
+from . import config
 
 
 class Base(DeclarativeBase):
@@ -13,30 +13,27 @@ class Base(DeclarativeBase):
 
 
 _engine = None
-_SessionLocal: sessionmaker[Session] | None = None
+SessionLocal: sessionmaker[Session] = sessionmaker(expire_on_commit=False)
 
 
-def init_engine(url: str | None = None):
-    global _engine, _SessionLocal
-    url = url or get_settings().database_url
-    kwargs = {"connect_args": {"check_same_thread": False}} if url.startswith("sqlite") else {"pool_pre_ping": True}
+def init_db(url: str | None = None):
+    global _engine
+    url = url or config.DATABASE_URL
+    if url.startswith("sqlite:///"):
+        config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        kwargs = {"connect_args": {"check_same_thread": False}}
+    else:
+        kwargs = {"pool_pre_ping": True}
     _engine = create_engine(url, **kwargs)
-    _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
-    from . import models  # noqa: F401  (tabloları kaydet)
+    SessionLocal.configure(bind=_engine)
+    from . import models  # noqa: F401
 
     Base.metadata.create_all(_engine)
     return _engine
 
 
-def session_factory() -> sessionmaker[Session]:
-    if _SessionLocal is None:
-        init_engine()
-    assert _SessionLocal is not None
-    return _SessionLocal
-
-
 def get_db() -> Iterator[Session]:
-    db = session_factory()()
+    db = SessionLocal()
     try:
         yield db
     finally:

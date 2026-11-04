@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Haftalık Rapor{% endblock %}
+{% block content %}
+<div class="filters no-print">
+  <a class="btn" href="/report?week={{ prev_week }}">← Önceki hafta</a>
+  <form method="get" class="actions"><input type="date" name="week" value="{{ r.week.isoformat() }}" aria-label="Hafta" onchange="this.form.submit()"></form>
+  <a class="btn" href="/report?week={{ next_week }}">Sonraki hafta →</a>
+  <span style="flex:1"></span>
+  <a class="btn" href="/report/download.html?week={{ r.week.isoformat() }}">HTML indir</a>
+  <button class="btn" type="button" onclick="window.print()">PDF olarak kaydet</button>
+  <a class="btn" href="/report/download.csv?week={{ r.week.isoformat() }}">Excel (CSV) indir</a>
+  <form method="post" action="/report/send" onsubmit="return confirm('Rapor şu adreslere gönderilsin mi?\n{{ recipients }}')">
+    <input type="hidden" name="week" value="{{ r.week.isoformat() }}">
+    <button class="btn primary" type="submit" {{ 'disabled title="Önce Ayarlar > E-posta ekranını doldurun"'|safe if not mail_ready }}>E-posta ile gönder</button>
+  </form>
+</div>
+<div class="report-frame">{% include "report_body.html" %}</div>
+{% endblock %}

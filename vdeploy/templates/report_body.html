@@ -1,0 +1,127 @@
+{# E-posta istemcilerinde de düzgün görünsün diye yalnızca tablo + satır içi stil kullanılır. #}
+{% set s = r.summary %}{% set pv = r.previous %}
+{% set ink = '#0b0b0b' %}{% set ink2 = '#52514e' %}{% set muted = '#898781' %}{% set line = '#e1e0d9' %}{% set blue = '#2a78d6' %}{% set orange = '#eb6834' %}
+{% macro delta(cur, prev, fmt='num') -%}
+  {%- if cur is not none and prev is not none -%}
+    {%- set d = cur - prev -%}
+    <span style="color:{{ muted }};font-size:12px">geçen hafta {% if fmt == 'hours' %}{{ prev|hours }}{% else %}{{ prev|num }}{% endif %}{% if d > 0 %} · ▲{% elif d < 0 %} · ▼{% endif %}</span>
+  {%- endif -%}
+{%- endmacro %}
+{% macro bars(rows, color) -%}
+  {% set mx = (rows|map(attribute='value')|max) if rows else 1 %}
+  <table role="presentation" style="width:100%;border-collapse:collapse;font-size:13px">
+  {% for row in rows %}
+    <tr>
+      <td style="padding:3px 8px 3px 0;color:{{ ink2 }};width:38%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px">{{ row.label }}</td>
+      <td style="padding:3px 0"><div style="background:{{ color }};height:12px;border-radius:0 4px 4px 0;width:{{ (100 * row.value / mx)|round(0) }}%;min-width:3px"></div></td>
+      <td style="padding:3px 0 3px 8px;text-align:right;width:32px;color:{{ ink }};font-variant-numeric:tabular-nums">{{ row.value }}</td>
+    </tr>
+  {% else %}<tr><td style="color:{{ muted }}">Veri yok</td></tr>{% endfor %}
+  </table>
+{%- endmacro %}
+<div style="font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;color:{{ ink }};background:#ffffff;padding:28px;max-width:900px;margin:0 auto">
+  <div style="font-size:12px;color:{{ muted }};text-transform:uppercase;letter-spacing:.06em">Haftalık Deployment Raporu</div>
+  <h1 style="font-size:24px;margin:4px 0 2px">{{ r.period.start|dt('%d.%m.%Y') }} – {{ r.period.end|dt('%d.%m.%Y') }}</h1>
+  <div style="color:{{ ink2 }};font-size:13px">Bakım penceresi: {{ r.window.describe() }}{% if generated %} · Oluşturulma: {{ generated|dt }}{% endif %}</div>
+
+  <table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px;margin:18px -8px 6px">
+    <tr>
+      {% for label, cur, prev, fmt in [
+          ('Toplam talep', s.total, pv.total, 'num'),
+          ('Pencere dışı', s.outside_window, pv.outside_window, 'num'),
+          ('Acil / kritik', s.emergency, pv.emergency, 'num'),
+          ('Medyan planlama', s.median_lead_hours, pv.median_lead_hours, 'hours')] %}
+      <td style="border:1px solid {{ line }};border-radius:10px;padding:12px 14px;width:25%;vertical-align:top">
+        <div style="font-size:12px;color:{{ ink2 }}">{{ label }}</div>
+        <div style="font-size:26px;font-weight:650;margin:2px 0">{% if fmt == 'hours' %}{{ cur|hours }}{% else %}{{ cur|num }}{% endif %}</div>
+        {{ delta(cur, prev, fmt) }}
+      </td>
+      {% endfor %}
+    </tr>
+    <tr>
+      {% for label, cur, prev, fmt in [
+          ('Medyan çözüm süresi', s.median_resolution_hours, pv.median_resolution_hours, 'hours'),
+          ('Geriye dönük kayıt', s.retroactive, pv.retroactive, 'num'),
+          ('Açık talep', s.open, pv.open, 'num'),
+          ('Etkilenen uygulama', s.applications, pv.applications, 'num')] %}
+      <td style="border:1px solid {{ line }};border-radius:10px;padding:12px 14px;width:25%;vertical-align:top">
+        <div style="font-size:12px;color:{{ ink2 }}">{{ label }}</div>
+        <div style="font-size:26px;font-weight:650;margin:2px 0">{% if fmt == 'hours' %}{{ cur|hours }}{% else %}{{ cur|num }}{% endif %}</div>
+        {{ delta(cur, prev, fmt) }}
+      </td>
+      {% endfor %}
+    </tr>
+  </table>
+
+  <h2 style="font-size:16px;margin:18px 0 8px">Özet</h2>
+  <ul style="margin:0;padding-left:20px;color:{{ ink }};font-size:14px;line-height:1.6">
+    {% for line_ in r.commentary %}<li>{{ line_ }}</li>{% endfor %}
+  </ul>
+
+  <h2 style="font-size:16px;margin:22px 0 4px">Son 8 hafta</h2>
+  <div style="font-size:12px;color:{{ ink2 }};margin-bottom:6px">
+    <span style="display:inline-block;width:10px;height:10px;background:{{ blue }};border-radius:3px"></span> Pencere içi &nbsp;
+    <span style="display:inline-block;width:10px;height:10px;background:{{ orange }};border-radius:3px"></span> Pencere dışı
+  </div>
+  {% set t = r.trend %}{% set tmax = (t.totals|max) if t.totals else 1 %}{% set tmax = tmax if tmax else 1 %}
+  <table role="presentation" style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed">
+    <tr style="height:120px">
+      {% for i in range(t.labels|length) %}
+      <td style="vertical-align:bottom;text-align:center;padding:0 4px">
+        <div style="font-size:11px;color:{{ ink2 }}">{{ t.totals[i] }}</div>
+        {% set inside = t.totals[i] - t.outside[i] %}
+        <div style="background:{{ orange }};height:{{ (100 * t.outside[i] / tmax)|round(0)|int }}px;border-radius:4px 4px 0 0;{{ 'display:none;' if not t.outside[i] }}"></div>
+        <div style="background:{{ blue }};height:{{ (100 * inside / tmax)|round(0)|int }}px;{{ 'border-radius:4px 4px 0 0;' if not t.outside[i] }}{{ 'border-top:2px solid #fff;' if t.outside[i] and inside }}{{ 'display:none;' if not inside }}"></div>
+      </td>
+      {% endfor %}
+    </tr>
+    <tr>{% for l in t.labels %}<td style="text-align:center;color:{{ muted }};padding-top:4px;border-top:1px solid #c3c2b7;{{ 'font-weight:700;color:' ~ ink ~ ';' if loop.last }}">{{ l }}</td>{% endfor %}</tr>
+  </table>
+
+  <table role="presentation" style="width:100%;border-collapse:collapse;margin-top:22px">
+    <tr>
+      <td style="width:50%;vertical-align:top;padding-right:14px">
+        <h2 style="font-size:15px;margin:0 0 8px">Talep tipi</h2>{{ bars(r.breakdowns.request_type, blue) }}
+        <h2 style="font-size:15px;margin:18px 0 8px">Departman</h2>{{ bars(r.breakdowns.department, blue) }}
+      </td>
+      <td style="width:50%;vertical-align:top;padding-left:14px">
+        <h2 style="font-size:15px;margin:0 0 8px">Uygulama</h2>{{ bars(r.breakdowns.application, blue) }}
+        <h2 style="font-size:15px;margin:18px 0 8px">Mikroservis</h2>{{ bars(r.breakdowns.microservice, blue) }}
+      </td>
+    </tr>
+  </table>
+
+  <h2 style="font-size:16px;margin:24px 0 8px">Dikkat çeken talepler ({{ r.notable|length }})</h2>
+  {% if r.notable %}
+  <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+    <tr>{% for h in ['Jira','Özet','Uygulama','Planlanan deploy','Neden'] %}<th style="text-align:left;padding:6px 8px;border-bottom:1px solid #c3c2b7;color:{{ ink2 }};font-weight:600">{{ h }}</th>{% endfor %}</tr>
+    {% for n in r.notable %}{% set c = n.change %}
+    <tr>
+      <td style="padding:6px 8px;border-bottom:1px solid {{ line }};white-space:nowrap">{{ c.jira_key or ('#' ~ c.id) }}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid {{ line }}">{{ c.summary }}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid {{ line }}">{{ c.application or '—' }}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid {{ line }};white-space:nowrap">{{ c.deploy_planned|dt }}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid {{ line }};color:{{ ink2 }}">{{ n.reasons|join(', ') }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p style="color:{{ muted }}">Yok.</p>{% endif %}
+
+  <h2 style="font-size:16px;margin:24px 0 8px">Haftanın tüm talepleri ({{ r.changes|length }})</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <tr>{% for h in ['Jira','Özet','Tip','Uygulama','Talep eden','Planlanan deploy','Durum','Sonuç'] %}<th style="text-align:left;padding:5px 8px;border-bottom:1px solid #c3c2b7;color:{{ ink2 }};font-weight:600">{{ h }}</th>{% endfor %}</tr>
+    {% for c in r.changes %}
+    <tr>
+      <td style="padding:5px 8px;border-bottom:1px solid {{ line }};white-space:nowrap">{{ c.jira_key or ('#' ~ c.id) }}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid {{ line }}">{{ c.summary }}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid {{ line }}">{{ c.request_type }}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid {{ line }}">{{ c.application or '—' }}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid {{ line }}">{{ c.requester or '—' }}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid {{ line }};white-space:nowrap">{{ c.deploy_planned|dt }}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid {{ line }}">{{ c.status }}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid {{ line }}">{{ r.outcomes[c.outcome] }}</td>
+    </tr>
+    {% else %}<tr><td colspan="8" style="padding:8px;color:{{ muted }}">Bu hafta talep yok.</td></tr>{% endfor %}
+  </table>
+  <p style="color:{{ muted }};font-size:11px;margin-top:24px">vDeploy tarafından oluşturuldu.</p>
+</div>

@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Ayarlar{% endblock %}
+{% macro inp(key, label, type='text', placeholder='', help='') -%}
+<div class="field"><label for="{{ key }}">{{ label }}</label>
+<input id="{{ key }}" name="{{ key }}" type="{{ type }}" value="{{ v[key] }}" placeholder="{{ placeholder }}">
+{% if help %}<div class="muted" style="font-size:12px;margin-top:4px">{{ help }}</div>{% endif %}</div>
+{%- endmacro %}
+{% macro secret(key, label) -%}
+<div class="field"><label for="{{ key }}">{{ label }}</label>
+<input id="{{ key }}" name="{{ key }}" type="password" autocomplete="new-password" placeholder="{{ '•••••••• (kayıtlı — değiştirmek için yazın)' if has_secret[key] else '' }}"></div>
+{%- endmacro %}
+{% macro chk(key, label) -%}
+<label class="check"><input type="checkbox" name="{{ key }}" value="1" {{ 'checked' if v[key] == '1' }}> {{ label }}</label>
+{%- endmacro %}
+{% block content %}
+<h1>Ayarlar</h1>
+<p class="sub">Ayarlar uygulamanın kendi veritabanında tutulur.</p>
+<nav class="tabs">
+  {% for key, label in [('smtp','E-posta (SMTP)'),('jira','Jira'),('window','Bakım penceresi'),('schedule','Zamanlama'),('ad','Active Directory')] %}
+  <a href="?tab={{ key }}" class="{{ 'on' if tab == key }}">{{ label }}</a>
+  {% endfor %}
+</nav>
+
+{% if tab == 'smtp' %}
+<div class="grid g2">
+  <form class="card" method="post" action="/settings/smtp">
+    <h2>SMTP sunucusu</h2>
+    <div class="form-grid" style="grid-template-columns:2fr 1fr">
+      {{ inp('smtp.host', 'Sunucu', placeholder='smtp.ornek.local') }}
+      {{ inp('smtp.port', 'Port', 'number') }}
+    </div>
+    <div class="field"><label for="smtp.security">Güvenlik</label>
+      <select id="smtp.security" name="smtp.security">
+        {% for k, l in [('none','Yok (iç relay, genelde port 25)'),('starttls','STARTTLS (genelde 587)'),('ssl','SSL/TLS (genelde 465)')] %}
+        <option value="{{ k }}" {{ 'selected' if v['smtp.security'] == k }}>{{ l }}</option>{% endfor %}
+      </select></div>
+    {{ inp('smtp.user', 'Kullanıcı adı', help='Kimlik doğrulamasız relay için boş bırakın.') }}
+    {{ secret('smtp.password', 'Parola') }}
+    {{ inp('smtp.from', 'Gönderen adres', 'email', 'vdeploy@ornek.com') }}
+    {{ inp('smtp.to', 'Rapor alıcıları', placeholder='ad1@ornek.com, ad2@ornek.com', help='Virgülle ayırın.') }}
+    <button class="btn primary" type="submit">Kaydet</button>
+  </form>
+  <form class="card" method="post" action="/settings/smtp/test" style="align-self:start">
+    <h2>Test e-postası</h2>
+    <p class="muted">Kayıtlı ayarlarla bir test e-postası gönderir.</p>
+    <div class="field"><label for="to">Alıcı (boşsa rapor alıcıları)</label><input id="to" name="to" type="text"></div>
+    <button class="btn" type="submit">Test gönder</button>
+  </form>
+</div>
+
+{% elif tab == 'jira' %}
+<div class="grid g2">
+  <form class="card" method="post" action="/settings/jira">
+    <h2>Jira Data Center / Server</h2>
+    {{ inp('jira.base_url', 'Jira adresi', 'url', 'https://jira.ornek.local') }}
+    {{ secret('jira.pat', 'Personal Access Token') }}
+    <div class="note">Token: Jira'da profil → <b>Personal Access Tokens</b> → Create token. Okuma yetkisi olan bir servis kullanıcısıyla oluşturulması önerilir.</div>
+    <div class="field"><label for="jira.jql">Haftalık çekim için JQL</label>
+      <textarea id="jira.jql" name="jira.jql" style="min-height:70px">{{ v['jira.jql'] }}</textarea></div>
+    {{ inp('jira.closed_statuses', 'Kapalı sayılan durumlar', help='Virgülle ayırın. Bu durumlardaki talepler “kapalı” sayılır.') }}
+    {{ chk('jira.verify_ssl', 'SSL sertifikasını doğrula') }}
+    <button class="btn primary" type="submit">Kaydet</button>
+  </form>
+  <form class="card" method="post" action="/settings/jira/test" style="align-self:start">
+    <h2>Bağlantı testi</h2>
+    <p class="muted">Kayıtlı adres ve token ile <code>/rest/api/2/myself</code> çağrılır.</p>
+    <button class="btn" type="submit">Bağlantıyı test et</button>
+  </form>
+</div>
+
+{% elif tab == 'window' %}
+<form class="card" method="post" action="/settings/window" style="max-width:640px">
+  <h2>Bakım penceresi</h2>
+  <p class="muted">Planlanan deploy zamanı bu aralığa düşmeyen talepler “pencere dışı” sayılır. Şu an: <b>{{ window.describe() }}</b></p>
+  <div class="field"><label>Günler</label>
+    <div class="days">{% for name in DAY_NAMES %}
+      <label class="check"><input type="checkbox" name="window.days" value="{{ loop.index0 }}" {{ 'checked' if loop.index0 in window.days }}> {{ name }}</label>
+    {% endfor %}</div></div>
+  <div class="form-grid" style="grid-template-columns:1fr 1fr">
+    {{ inp('window.start', 'Başlangıç', 'time') }}
+    {{ inp('window.end', 'Bitiş', 'time', help='Bitiş başlangıçtan önceyse pencere gece yarısını aşar (örn. 22:00–06:00).') }}
+  </div>
+  <button class="btn primary" type="submit">Kaydet</button>
+</form>
+
+{% elif tab == 'schedule' %}
+<form class="card" method="post" action="/settings/schedule" style="max-width:640px">
+  <h2>Haftalık otomatik iş</h2>
+  <p class="muted">Seçilen gün ve saatte sırasıyla: Jira'dan son kayıtlar çekilir, ardından <b>önceki haftanın</b> raporu e-postayla gönderilir.
+    {% if not scheduler_on %}<br><b>Zamanlayıcı bu kurulumda kapalı (VDEPLOY_SCHEDULER=0).</b>
+    {% elif next_run %}<br>Sonraki çalışma: <b>{{ next_run }}</b>{% endif %}</p>
+  <div class="form-grid" style="grid-template-columns:1fr 1fr">
+    <div class="field"><label for="schedule.day">Gün</label>
+      <select id="schedule.day" name="schedule.day">
+        {% for k, name in [('mon','Pazartesi'),('tue','Salı'),('wed','Çarşamba'),('thu','Perşembe'),('fri','Cuma'),('sat','Cumartesi'),('sun','Pazar')] %}
+        <option value="{{ k }}" {{ 'selected' if v['schedule.day'] == k }}>{{ name }}</option>{% endfor %}
+      </select></div>
+    {{ inp('schedule.time', 'Saat', 'time') }}
+  </div>
+  {{ chk('jira.auto_sync', 'Jira’dan otomatik çek') }}
+  {{ chk('smtp.auto_send', 'Raporu e-postayla otomatik gönder') }}
+  <button class="btn primary" type="submit">Kaydet</button>
+</form>
+
+{% elif tab == 'ad' %}
+<div class="grid g2">
+  <form class="card" method="post" action="/settings/ad">
+    <h2>Active Directory (LDAP) girişi</h2>
+    <div class="note">Kapalıyken herkes uygulamaya doğrudan girer. Açmadan önce sağdaki testle bir kullanıcıyı doğrulayın.</div>
+    {{ chk('ad.enabled', 'AD ile giriş zorunlu') }}
+    <div class="form-grid" style="grid-template-columns:2fr 1fr">
+      {{ inp('ad.server', 'Domain controller', placeholder='dc01.ornek.local') }}
+      {{ inp('ad.port', 'Port', 'number') }}
+    </div>
+    {{ chk('ad.use_ssl', 'LDAPS (SSL) kullan') }}
+    {{ inp('ad.domain', 'Domain (UPN soneki)', placeholder='ornek.local', help='Kullanıcı “ad.soyad” yazınca ad.soyad@domain ile doğrulanır.') }}
+    {{ inp('ad.base_dn', 'Base DN', placeholder='DC=ornek,DC=local', help='Görünen ad ve grup kontrolü için.') }}
+    {{ inp('ad.allowed_group', 'İzinli grup (opsiyonel)', placeholder='CN=vDeploy-Users,OU=Groups,DC=ornek,DC=local', help='Grup adı (CN) veya tam DN. Boşsa tüm domain kullanıcıları girebilir.') }}
+    <button class="btn primary" type="submit">Kaydet</button>
+  </form>
+  <form class="card" method="post" action="/settings/ad/test" style="align-self:start">
+    <h2>Kullanıcı doğrulama testi</h2>
+    <p class="muted">Kayıtlı AD ayarlarıyla (giriş açık olmasa da) bir kullanıcıyı doğrular.</p>
+    <div class="field"><label for="tu">Kullanıcı adı</label><input id="tu" name="username" autocomplete="off"></div>
+    <div class="field"><label for="tp">Parola</label><input id="tp" name="password" type="password" autocomplete="new-password"></div>
+    <button class="btn" type="submit">Test et</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

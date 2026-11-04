@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Talepler{% endblock %}
+{% block content %}
+<div class="chart-head" style="margin-bottom:12px">
+  <div><h1>Talepler</h1><p class="sub" style="margin:0">{{ rows|length }} kayıt</p></div>
+  <a class="btn primary" href="/changes/new">+ Yeni talep</a>
+</div>
+<form class="filters" method="get">
+  <input type="search" name="q" value="{{ q }}" placeholder="Jira no, özet, uygulama, mikroservis, kişi…" style="min-width:280px">
+  <select name="request_type"><option value="">Tüm tipler</option>{% for t in types %}<option {{ 'selected' if t == request_type }}>{{ t }}</option>{% endfor %}</select>
+  <select name="outcome"><option value="">Tüm sonuçlar</option>{% for k, v in OUTCOMES.items() %}<option value="{{ k }}" {{ 'selected' if k == outcome }}>{{ v }}</option>{% endfor %}</select>
+  <select name="only">
+    <option value="">Hepsi</option>
+    <option value="outside" {{ 'selected' if only == 'outside' }}>Pencere dışı</option>
+    <option value="emergency" {{ 'selected' if only == 'emergency' }}>Acil</option>
+    <option value="open" {{ 'selected' if only == 'open' }}>Açık</option>
+  </select>
+  <button class="btn" type="submit">Filtrele</button>
+</form>
+<div class="card" style="padding:0">
+  <div class="table-wrap"><table>
+    <thead><tr><th>Jira</th><th>Özet</th><th>Tip</th><th>Uygulama</th><th>Talep eden</th><th>Oluşturma</th><th>Planlanan deploy</th><th>Durum</th><th>Sonuç</th></tr></thead>
+    <tbody>
+    {% for c in rows %}
+      <tr>
+        <td style="white-space:nowrap"><a href="/changes/{{ c.id }}">{{ c.jira_key or ('#' ~ c.id) }}</a>{% if c.source == 'manual' %} <span class="tag">elle</span>{% endif %}</td>
+        <td>{{ c.summary }}{% if c.microservices %}<div class="muted" style="font-size:12px">{{ c.microservices }}</div>{% endif %}</td>
+        <td>{{ c.request_type }}</td>
+        <td>{{ c.application or '—' }}</td>
+        <td>{{ c.requester or '—' }}<div class="muted" style="font-size:12px">{{ c.department or '' }}</div></td>
+        <td style="white-space:nowrap">{{ c.created|dt }}</td>
+        <td style="white-space:nowrap">{{ c.deploy_planned|dt }}
+          {% if c.id in outside %}<div><span class="tag serious">Pencere dışı</span></div>{% endif %}
+          {% if c.is_emergency %}<div><span class="tag critical">Acil</span></div>{% endif %}</td>
+        <td>{{ c.status or '—' }}</td>
+        <td>{% set cls = {'success':'good','failed':'critical','rolled_back':'critical'}.get(c.outcome, '') %}<span class="tag {{ cls }}">{{ OUTCOMES[c.outcome] }}</span></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="empty">Kayıt bulunamadı.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

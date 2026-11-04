@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}vDeploy{% endblock %} · vDeploy</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v={{ version }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  {% set p = request.url.path %}
+  <header class="topbar">
+    <a class="brand" href="/">v<span>Deploy</span></a>
+    <nav class="nav">
+      <a href="/" class="{{ 'active' if p == '/' }}">Dashboard</a>
+      <a href="/changes" class="{{ 'active' if p.startswith('/changes') }}">Talepler</a>
+      <a href="/report" class="{{ 'active' if p.startswith('/report') }}">Haftalık Rapor</a>
+      <a href="/import" class="{{ 'active' if p.startswith('/import') }}">Veri Aktarımı</a>
+      <a href="/settings" class="{{ 'active' if p.startswith('/settings') }}">Ayarlar</a>
+    </nav>
+    {% if user %}<div class="userbox">{{ user.name }} · <a href="/logout">Çıkış</a></div>{% endif %}
+  </header>
+  <main>
+    {% for f in flashes %}<div class="flash {{ f.kind }}">{{ f.message }}</div>{% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
