@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+from collections import Counter
 from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
@@ -12,38 +13,104 @@ from . import metrics, settings_store
 from .models import OUTCOMES, ChangeRequest
 
 
+RESOLUTION_BUCKETS = [("0–4 saat", 0, 4), ("4–12 saat", 4, 12), ("12–24 saat", 12, 24), ("1–3 gün", 24, 72),
+                      ("3+ gün", 72, None)]
+
+
+def _bucket(hours: float | None, buckets) -> str | None:
+    if hours is None:
+        return None
+    for label, lo, hi in buckets:
+        if (lo is None or hours >= lo) and (hi is None or hours < hi):
+            return label
+    return None
+
+
+def _ms(d) -> int | None:
+    return int(d.timestamp() * 1000) if d else None
+
+
+def charts(changes: list[ChangeRequest], window, trend: dict, week: date) -> dict:
+    """Rapor ekranındaki grafiklerin verisi (JSON olarak sayfaya gömülür)."""
+    days = [{"inside": 0, "outside": 0} for _ in range(7)]
+    hours = [{"inside": 0, "outside": 0} for _ in range(24)]
+    for c in changes:
+        t = metrics.deploy_time(c)
+        if not t:
+            continue
+        side = "outside" if metrics.outside_window(c, window) else "inside"
+        days[t.weekday()][side] += 1
+        hours[t.hour][side] += 1
+
+    res_counts = Counter(_bucket(metrics.resolution_hours(c), RESOLUTION_BUCKETS) for c in changes)
+    s = metrics.summary(changes, window)
+    no_date = sum(1 for c in changes if metrics.deploy_time(c) is None)
+    risks = [
+        ("Pencere dışı", s["outside_window"], "outside"),
+        ("Geriye dönük kayıt", s["retroactive"], "retroactive"),
+        ("Test yapılamıyor", sum(1 for c in changes if c.pre_test_possible is False or c.post_test_possible is False), "no_test"),
+        ("Acil / kritik", s["emergency"], "emergency"),
+        ("DB yapısal değişiklik", s["db_structural"], "db"),
+        ("Açık talep", s["open"], "open"),
+        ("Vendor'lu", s["vendor"], "vendor"),
+    ]
+    timeline = []
+    for c in sorted(changes, key=lambda x: (x.deploy_planned or x.created)):
+        timeline.append({
+            "id": c.id, "key": c.jira_key or f"#{c.id}", "summary": c.summary, "app": c.application or "",
+            "type": c.request_type, "created": _ms(c.created), "planned": _ms(c.deploy_planned),
+            "resolved": _ms(c.resolved), "outside": metrics.outside_window(c, window), "emergency": c.is_emergency,
+            "lead": metrics.lead_hours(c), "resolution": metrics.resolution_hours(c),
+        })
+    bd = metrics.breakdowns(changes, window)
+    return {
+        "week_start": week.isoformat(),
+        "week_end": (week + timedelta(days=6)).isoformat(),
+        "window": {"days": sorted(window.days), "start": window.start.hour, "end": window.end.hour},
+        "days": days,
+        "hours": hours,
+        "share_window": [s["total"] - s["outside_window"] - no_date, s["outside_window"], no_date],
+        "share_status": [s["closed"], s["open"]],
+        "risks": [{"label": l, "value": v, "only": o} for l, v, o in risks],
+        "lead_buckets": bd["lead_buckets"],
+        "resolution_buckets": [{"label": l, "value": res_counts.get(l, 0)} for l, _, _ in RESOLUTION_BUCKETS],
+        "request_type": bd["request_type"],
+        "application": bd["application"],
+        "microservice": bd["microservice"],
+        "department": bd["department"],
+        "assignee": bd["assignee"],
+        "requester": bd["requester"],
+        "timeline": timeline,
+        "trend": trend,
+    }
+
+
 def build(db: Session, week: date) -> dict:
     week = metrics.week_start(week)
     values = settings_store.get_all(db)
     window = settings_store.window(values)
     cur_p = metrics.Period(week, week + timedelta(days=6))
-    prev_p = metrics.Period(week - timedelta(days=7), week - timedelta(days=1))
-    # Kıyas için son 8 haftalık trend
     trend_p = metrics.Period(week - timedelta(weeks=7), cur_p.end)
 
     all_rows = db.query(ChangeRequest).all()
     cur = metrics.in_period(all_rows, cur_p)
-    prev = metrics.in_period(all_rows, prev_p)
-    trend = metrics.in_period(all_rows, trend_p)
+    trend = metrics.breakdowns(metrics.in_period(all_rows, trend_p), window)["weekly"]
 
     s_cur = metrics.summary(cur, window)
-    s_prev = metrics.summary(prev, window)
+    bd = metrics.breakdowns(cur, window)
     return {
         "week": week,
         "period": cur_p,
         "window": window,
         "summary": s_cur,
-        "previous": s_prev,
-        "deltas": {
-            k: metrics.delta(s_cur[k], s_prev[k])
-            for k in ("total", "outside_window", "emergency", "median_lead_hours", "median_resolution_hours", "open")
-        },
-        "breakdowns": metrics.breakdowns(cur, window),
-        "trend": metrics.breakdowns(trend, window)["weekly"],
+        "breakdowns": bd,
+        "trend": trend,
+        "charts": charts(cur, window, trend, week),
         "notable": metrics.notable(cur, window),
         "changes": sorted(cur, key=lambda c: c.ref_date),
-        "commentary": commentary(s_cur, s_prev, metrics.breakdowns(cur, window)),
+        "commentary": commentary(s_cur, bd),
         "outcomes": OUTCOMES,
+        "jira_url": values["jira.base_url"].rstrip("/"),
     }
 
 
@@ -52,42 +119,47 @@ def _n(v) -> str:
     return f"{v:g}".replace(".", ",") if isinstance(v, float) else str(v)
 
 
-def commentary(cur: dict, prev: dict, bd: dict) -> list[str]:
-    """Kural tabanlı kısa yorumlar (rapora düz metin olarak girer)."""
-    lines: list[str] = []
+def _leader(rows: list[dict], skip=("Belirtilmemiş", "Atanmamış", "Diğer")) -> str | None:
+    """En çok olan(lar)ı yazar; en yüksek sayı 2'den azsa (hepsi 1 ise) bilgi vermez."""
+    rows = [r for r in rows if r["label"] not in skip]
+    if not rows or rows[0]["value"] < 2:
+        return None
+    top = rows[0]["value"]
+    names = [r["label"] for r in rows if r["value"] == top]
+    if len(names) == 1:
+        return f"{names[0]} ({top})"
+    return f"{', '.join(names[:-1])} ve {names[-1]} ({top}'er)" if len(names) <= 4 else None
+
+
+def commentary(cur: dict, bd: dict) -> list[str]:
+    """Kural tabanlı kısa yorumlar. Önceki haftayla kıyas yapılmaz."""
     if cur["total"] == 0:
         return ["Bu hafta kayıtlı deployment talebi yok."]
-    diff = cur["total"] - prev["total"]
-    if prev["total"]:
-        trend = "arttı" if diff > 0 else "azaldı" if diff < 0 else "değişmedi"
-        lines.append(f"Bu hafta {cur['total']} deployment talebi var; geçen haftaya göre {abs(diff)} adet {trend}." if diff else
-                     f"Bu hafta {cur['total']} deployment talebi var; geçen haftayla aynı.")
-    else:
-        lines.append(f"Bu hafta {cur['total']} deployment talebi var.")
-    if bd["request_type"]:
-        top = bd["request_type"][0]
-        lines.append(f"En sık talep tipi: {top['label']} ({top['value']} adet).")
-    apps = [a for a in bd["application"] if a["label"] not in ("Belirtilmemiş", "Diğer")]
-    if apps:
-        lines.append(f"En çok değişen uygulama: {apps[0]['label']} ({apps[0]['value']} talep).")
+    lines = [f"Bu hafta {cur['total']} deployment talebi var; {cur['closed']} kapalı, {cur['open']} açık."]
+    for title, rows in (("En sık talep tipi", bd["request_type"]), ("En çok deploy çıkan uygulama", bd["application"]),
+                        ("En çok değişen mikroservis", bd["microservice"]),
+                        ("En çok talep açan departman", bd["department"])):
+        leader = _leader(rows)
+        if leader:
+            lines.append(f"{title}: {leader}.")
     if cur["outside_window"]:
-        lines.append(
-            f"{cur['outside_window']} talep (%{_n(cur['outside_window_rate'])}) bakım penceresi dışında planlanmış."
-        )
+        lines.append(f"{cur['outside_window']} talep (%{_n(cur['outside_window_rate'])}) bakım penceresi dışında planlanmış.")
+    else:
+        lines.append("Tüm talepler bakım penceresi içinde planlanmış.")
     if cur["retroactive"]:
         lines.append(f"{cur['retroactive']} talepte deploy tarihi, talebin açılışından önce; kayıt iş yapıldıktan sonra açılmış görünüyor.")
     if cur["short_notice_rate"] is not None and cur["short_notice_rate"] >= 50:
         lines.append(f"Taleplerin %{_n(cur['short_notice_rate'])}'i deploy'dan 24 saatten kısa süre önce açılmış.")
+    if cur["median_resolution_hours"] is not None:
+        lines.append(f"Medyan çözüm süresi {_n(cur['median_resolution_hours'])} saat.")
     if cur["emergency"]:
         lines.append(f"{cur['emergency']} acil/kritik deployment var.")
     if cur["no_pre_test"] or cur["no_post_test"]:
-        lines.append(
-            f"Test yapılamayan talepler: deploy öncesi {cur['no_pre_test']}, deploy sonrası {cur['no_post_test']}."
-        )
+        lines.append(f"Test yapılamayan talepler: deploy öncesi {cur['no_pre_test']}, deploy sonrası {cur['no_post_test']}.")
     if cur["db_structural"]:
         lines.append(f"{cur['db_structural']} talepte veritabanında yapısal değişiklik var.")
-    if cur["open"]:
-        lines.append(f"{cur['open']} talep hâlâ kapanmamış.")
+    if cur["vendor"]:
+        lines.append(f"{cur['vendor']} talep vendor üzerinden yürütülmüş.")
     if cur["change_failure_rate"] is not None:
         lines.append(f"Sonucu girilen {cur['outcome_judged']} talepte başarısızlık/geri alma oranı %{_n(cur['change_failure_rate'])}.")
     return lines

@@ -5,12 +5,12 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -46,7 +46,16 @@ def _fmt_num(v, suffix=""):
     return s.replace(",", "X").replace(".", ",").replace("X", ".") + suffix
 
 
+def _read_static(name: str) -> str:
+    """İndirilebilir rapora CSS/JS'i gömmek için (tek dosya, internetsiz açılır)."""
+    path = (BASE / "static" / name).resolve()
+    if not path.is_relative_to((BASE / "static").resolve()):
+        raise ValueError(name)
+    return path.read_text(encoding="utf-8").replace("</script", "<\\/script")
+
+
 templates.env.filters.update(dt=_fmt_dt, hours=_fmt_hours, num=_fmt_num)
+templates.env.globals["read_static"] = _read_static
 templates.env.globals.update(OUTCOMES=OUTCOMES, DAY_NAMES=settings_store.DAY_NAMES, version=__version__)
 
 
@@ -197,29 +206,33 @@ def dashboard(request: Request, range: str = "8w", start: str = "", end: str = "
 
 # ---------- talepler ----------
 @app.get("/changes", response_class=HTMLResponse)
-def changes_list(request: Request, q: str = "", request_type: str = "", outcome: str = "", only: str = "",
-                 db: Session = Depends(get_db)):
+def changes_list(request: Request, db: Session = Depends(get_db)):
     window = settings_store.window(settings_store.get_all(db))
-    query = db.query(ChangeRequest)
-    if q:
-        like = f"%{q}%"
-        query = query.filter(or_(ChangeRequest.jira_key.ilike(like), ChangeRequest.summary.ilike(like),
-                                 ChangeRequest.application.ilike(like), ChangeRequest.microservices.ilike(like),
-                                 ChangeRequest.requester.ilike(like), ChangeRequest.assignee.ilike(like)))
-    if request_type:
-        query = query.filter(ChangeRequest.request_type == request_type)
-    if outcome:
-        query = query.filter(ChangeRequest.outcome == outcome)
-    if only == "open":
-        query = query.filter(ChangeRequest.is_closed.is_(False))
-    if only == "emergency":
-        query = query.filter(ChangeRequest.is_emergency.is_(True))
-    rows = sorted(query.all(), key=lambda c: c.ref_date, reverse=True)
-    if only == "outside":
-        rows = [c for c in rows if metrics.outside_window(c, window)]
-    return render(request, "changes.html", rows=rows, q=q, request_type=request_type, outcome=outcome, only=only,
+    f = {k: request.query_params.get(k, "").strip() for k in metrics.FILTER_KEYS}
+    rows = metrics.filter_changes(db.query(ChangeRequest).all(), f, window)
+    rows.sort(key=lambda c: c.ref_date, reverse=True)
+    chips = []
+    for k, v in f.items():
+        if not v or k == "q":
+            continue
+        shown = {"__none__": "Belirtilmemiş"}.get(v, v)
+        if k == "only":
+            shown = metrics.ONLY_LABELS.get(v, v)
+        elif k == "outcome":
+            shown = OUTCOMES.get(v, v)
+        elif k == "dow" and v.isdigit():
+            shown = settings_store.DAY_NAMES[int(v) % 7]
+        elif k == "hour" and v.isdigit():
+            shown = f"{int(v):02d}:00–{int(v):02d}:59"
+        elif k in ("start", "end"):
+            d = _parse_date(v)
+            shown = d.strftime("%d.%m.%Y") if d else v
+        rest = {kk: vv for kk, vv in f.items() if vv and kk != k}
+        chips.append({"label": metrics.FILTER_LABELS[k], "value": shown, "remove": "/changes?" + urlencode(rest)})
+    return render(request, "changes.html", rows=rows, f=f, chips=chips, only_labels=metrics.ONLY_LABELS,
                   types=_distinct(db, ChangeRequest.request_type), window=window,
-                  outside={c.id for c in rows if metrics.outside_window(c, window)})
+                  outside={c.id for c in rows if metrics.outside_window(c, window)},
+                  hidden={k: v for k, v in f.items() if v and k not in ("q", "request_type", "outcome", "only")})
 
 
 FORM_FIELDS = ["summary", "request_type", "application", "microservices", "department", "requester", "assignee",
@@ -402,7 +415,7 @@ def report_download_csv(week: str = "", db: Session = Depends(get_db)):
 
 def render_report_email(db: Session, week: date, values: dict[str, str]) -> list[str]:
     data = report.build(db, week)
-    html = templates.get_template("report_doc.html").render(r=data, standalone=True, generated=datetime.now())
+    html = templates.get_template("report_email.html").render(r=data, standalone=True, generated=datetime.now())
     p = data["period"]
     subject = f"Haftalık Deployment Raporu – {p.start:%d.%m.%Y}–{p.end:%d.%m.%Y}"
     entry = SyncLog(kind="mail")

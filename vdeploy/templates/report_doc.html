@@ -1,7 +1,12 @@
 <!doctype html>
 <html lang="tr">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Haftalık Deployment Raporu {{ r.period.start|dt('%d.%m.%Y') }}</title>
-<style>body{margin:0;background:#f9f9f7}@media print{body{background:#fff}}</style></head>
-<body>{% include "report_body.html" %}</body>
+<style>{{ read_static('app.css')|safe }}</style>
+</head>
+<body><main>{% include "report_view.html" %}</main>
+<script>{{ read_static('vendor/chart.umd.min.js')|safe }}</script>
+<script>{{ read_static('report.js')|safe }}</script>
+</body>
 </html>

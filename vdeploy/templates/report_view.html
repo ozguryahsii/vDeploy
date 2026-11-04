@@ -1,0 +1,125 @@
+{# Rapor ekranı ve indirilen HTML/PDF için ortak gövde. Grafikler report.js ile çizilir. #}
+{% set s = r.summary %}
+{% macro jira(c) -%}
+  {%- if r.jira_url and c.jira_key -%}<a href="{{ r.jira_url }}/browse/{{ c.jira_key }}" target="_blank" rel="noopener">{{ c.jira_key }}</a>
+  {%- elif not standalone %}<a href="/changes/{{ c.id }}">{{ c.jira_key or ('#' ~ c.id) }}</a>
+  {%- else %}{{ c.jira_key or ('#' ~ c.id) }}{% endif -%}
+{%- endmacro %}
+{% macro chart(id, title, hint='', cls='', label='') -%}
+<div class="card {{ cls }}">
+  <div class="chart-head"><h2>{{ title }}</h2>{% if hint %}<span class="hint">{{ hint }}</span>{% endif %}</div>
+  <div class="legend" id="{{ id }}Legend"></div>
+  <div class="chart-box" id="{{ id }}Box"><canvas id="{{ id }}" role="img" aria-label="{{ label or title }}"></canvas></div>
+</div>
+{%- endmacro %}
+<div class="report">
+  <header class="report-head">
+    <div class="eyebrow">Haftalık Deployment Raporu</div>
+    <h1>{{ r.period.start|dt('%d.%m.%Y') }} – {{ r.period.end|dt('%d.%m.%Y') }}</h1>
+    <p class="sub">Bakım penceresi: {{ r.window.describe() }}{% if generated %} · Oluşturulma: {{ generated|dt }}{% endif %}</p>
+  </header>
+
+  {% if not s.total %}
+  <div class="card empty"><h2>Bu hafta kayıtlı deployment talebi yok</h2><p>Başka bir hafta seçin ya da Veri Aktarımı ekranından güncel kayıtları yükleyin.</p></div>
+  {% else %}
+  <div class="kpis">
+    <div class="kpi"><div class="label">Toplam talep</div><div class="value">{{ s.total }}</div><div class="delta">{{ s.closed }} kapalı · {{ s.open }} açık</div></div>
+    <div class="kpi"><div class="label">Bakım penceresi dışı</div><div class="value">{{ s.outside_window }}<small>%{{ s.outside_window_rate|num }}</small></div><div class="delta">Planlanan deploy zamanına göre</div></div>
+    <div class="kpi"><div class="label">Medyan planlama süresi</div><div class="value">{{ s.median_lead_hours|hours }}</div><div class="delta">Talep açılışı → planlanan deploy</div></div>
+    <div class="kpi"><div class="label">Medyan çözüm süresi</div><div class="value">{{ s.median_resolution_hours|hours }}</div><div class="delta">Talep açılışı → çözüm</div></div>
+    <div class="kpi"><div class="label">Geriye dönük kayıt</div><div class="value">{{ s.retroactive }}</div><div class="delta">Deploy, talep açılmadan önce</div></div>
+    <div class="kpi"><div class="label">Acil / kritik</div><div class="value">{{ s.emergency }}</div><div class="delta">Acil nedeni girilmiş talepler</div></div>
+    <div class="kpi"><div class="label">Etkilenen uygulama</div><div class="value">{{ s.applications }}</div><div class="delta">{{ s.microservices }} farklı mikroservis</div></div>
+    <div class="kpi"><div class="label">Test yapılamayan</div><div class="value">{{ s.no_pre_test }}<small>öncesi</small> {{ s.no_post_test }}<small>sonrası</small></div><div class="delta">“Test yapılabilir?” = Hayır</div></div>
+  </div>
+
+  <div class="grid g-summary">
+    <div class="card">
+      <h2>Haftanın özeti</h2>
+      <ul class="commentary">{% for line in r.commentary %}<li>{{ line }}</li>{% endfor %}</ul>
+    </div>
+    <div class="card">
+      <h2>Oranlar</h2>
+      <div class="donuts">
+        <figure><div class="donut-box"><canvas id="shareWindow" role="img" aria-label="Bakım penceresi uyumu"></canvas><div class="donut-center" id="shareWindowCenter"></div></div><figcaption>Bakım penceresi</figcaption><div class="legend" id="shareWindowLegend"></div></figure>
+        <figure><div class="donut-box"><canvas id="shareStatus" role="img" aria-label="Kapalı ve açık talepler"></canvas><div class="donut-center" id="shareStatusCenter"></div></div><figcaption>Talep durumu</figcaption><div class="legend" id="shareStatusLegend"></div></figure>
+      </div>
+    </div>
+  </div>
+
+  <div class="card section">
+    <div class="chart-head"><h2>Talep yaşam döngüsü</h2><span class="hint">Çubuk: talep açılışı → çözüm · ◆ planlanan deploy · gölgeli alan: bakım penceresi</span></div>
+    <div class="legend" id="timelineLegend"></div>
+    <div class="chart-box" id="timelineBox"><canvas id="timeline" role="img" aria-label="Her talebin açılış, planlanan deploy ve çözüm zamanları"></canvas></div>
+  </div>
+
+  <div class="grid g2 section">
+    {{ chart('days', 'Gün bazında deploy', 'Planlanan deploy günü') }}
+    {{ chart('hours', 'Saat bazında deploy', 'Planlanan deploy saati') }}
+  </div>
+
+  <div class="grid g2 section">
+    {{ chart('risks', 'Risk göstergeleri', 'Talep sayısı') }}
+    {{ chart('requestType', 'Talep tipi') }}
+    {{ chart('application', 'Uygulama bazında', 'İlk 10') }}
+    {{ chart('microservice', 'Mikroservis bazında', 'İlk 10') }}
+  </div>
+
+  <div class="grid g3 section">
+    {{ chart('department', 'Talep eden departman') }}
+    {{ chart('requester', 'Talep eden kişi', 'İlk 10') }}
+    {{ chart('assignee', 'Uygulayan') }}
+  </div>
+
+  <div class="grid g2 section">
+    {{ chart('lead', 'Planlama süresi dağılımı', 'Talep açılışı → planlanan deploy') }}
+    {{ chart('resolution', 'Çözüm süresi dağılımı', 'Talep açılışı → çözüm') }}
+  </div>
+
+  <div class="section">{{ chart('trend', 'Son 8 hafta', 'Seçili hafta koyu renkte') }}</div>
+
+  <div class="card section">
+    <h2>Dikkat çeken talepler ({{ r.notable|length }})</h2>
+    {% if r.notable %}
+    <div class="table-wrap"><table>
+      <thead><tr><th>Jira</th><th>Özet</th><th>Uygulama</th><th>Talep eden</th><th>Planlanan deploy</th><th>Neden</th></tr></thead>
+      <tbody>
+      {% for n in r.notable %}{% set c = n.change %}
+      <tr><td class="nowrap">{{ jira(c) }}</td><td>{{ c.summary }}</td><td>{{ c.application or '—' }}</td><td>{{ c.requester or '—' }}</td>
+        <td class="nowrap">{{ c.deploy_planned|dt }}</td>
+        <td>{% for x in n.reasons %}<span class="tag {{ 'critical' if x in ('Acil','Başarısız','Geri alındı') else 'serious' }}">{{ x }}</span>{% endfor %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% else %}<p class="muted">Yok.</p>{% endif %}
+  </div>
+
+  <div class="card section">
+    <h2>Haftanın tüm talepleri ({{ r.changes|length }})</h2>
+    <div class="table-wrap"><table class="dense">
+      <thead><tr><th>Jira</th><th>Özet</th><th>Tip</th><th>Uygulama / mikroservis</th><th>Talep eden</th><th>Uygulayan</th>
+        <th>Açılış</th><th>Planlanan</th><th>Çözüm</th><th class="num">Planlama</th><th class="num">Çözüm süresi</th><th>Durum</th><th>Sonuç</th></tr></thead>
+      <tbody>
+      {% for c in r.changes %}{% set tl = r.charts.timeline | selectattr('id', 'equalto', c.id) | first %}
+      <tr>
+        <td class="nowrap">{{ jira(c) }}</td><td>{{ c.summary }}</td><td>{{ c.request_type }}</td>
+        <td>{{ c.application or '—' }}{% if c.microservices %}<div class="muted small">{{ c.microservices }}</div>{% endif %}</td>
+        <td>{{ c.requester or '—' }}<div class="muted small">{{ c.department or '' }}</div></td>
+        <td>{{ c.assignee or '—' }}</td>
+        <td class="nowrap">{{ c.created|dt('%d.%m %H:%M') }}</td>
+        <td class="nowrap">{{ c.deploy_planned|dt('%d.%m %H:%M') }}{% if tl.outside %} <span class="tag serious">dışı</span>{% endif %}</td>
+        <td class="nowrap">{{ c.resolved|dt('%d.%m %H:%M') }}</td>
+        <td class="num nowrap">{{ tl.lead|hours }}</td><td class="num nowrap">{{ tl.resolution|hours }}</td>
+        <td>{{ c.status }}</td><td>{{ r.outcomes[c.outcome] }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </div>
+  {% endif %}
+  <p class="muted small" style="margin-top:16px">vDeploy tarafından oluşturuldu.</p>
+</div>
+<script>
+  window.VDEPLOY_REPORT = {{ r.charts|tojson }};
+  window.VDEPLOY_REPORT.interactive = {{ 'false' if standalone else 'true' }};
+</script>

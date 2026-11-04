@@ -49,3 +49,22 @@ def test_ad_login_off_by_default_and_enforced_when_on(client):
     r = client.get("/", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"].startswith("/login")
     assert client.get("/login").status_code == 200
+
+
+def test_list_filters_from_chart_clicks(client):
+    client.post("/import/csv", files={"file": ("e.csv", csv_bytes(), "text/csv")})
+    page = client.get("/changes?start=2026-10-05&end=2026-10-11&application=UygA").text
+    assert "SAY-1" in page and "SAY-2" not in page and "Tümünü temizle" in page
+    page = client.get("/changes?department=__none__").text
+    assert "SAY-2" in page and "SAY-1</a>" not in page
+    page = client.get("/changes?microservice=svc-b&only=inside").text
+    assert "SAY-1" in page and "SAY-2" not in page
+    page = client.get("/changes?dow=1&hour=11").text  # Salı 11:00
+    assert "SAY-2" in page and "SAY-1</a>" not in page
+
+
+def test_report_standalone_embeds_assets(client):
+    client.post("/import/csv", files={"file": ("e.csv", csv_bytes(), "text/csv")})
+    html = client.get("/report/download.html?week=2026-10-05").text
+    assert "Chart.js v4" in html and "VDEPLOY_REPORT" in html and "interactive = false" in html
+    assert "/static/" not in html

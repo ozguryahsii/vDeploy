@@ -1,12 +1,6 @@
 {# E-posta istemcilerinde de düzgün görünsün diye yalnızca tablo + satır içi stil kullanılır. #}
-{% set s = r.summary %}{% set pv = r.previous %}
+{% set s = r.summary %}
 {% set ink = '#0b0b0b' %}{% set ink2 = '#52514e' %}{% set muted = '#898781' %}{% set line = '#e1e0d9' %}{% set blue = '#2a78d6' %}{% set orange = '#eb6834' %}
-{% macro delta(cur, prev, fmt='num') -%}
-  {%- if cur is not none and prev is not none -%}
-    {%- set d = cur - prev -%}
-    <span style="color:{{ muted }};font-size:12px">geçen hafta {% if fmt == 'hours' %}{{ prev|hours }}{% else %}{{ prev|num }}{% endif %}{% if d > 0 %} · ▲{% elif d < 0 %} · ▼{% endif %}</span>
-  {%- endif -%}
-{%- endmacro %}
 {% macro bars(rows, color) -%}
   {% set mx = (rows|map(attribute='value')|max) if rows else 1 %}
   <table role="presentation" style="width:100%;border-collapse:collapse;font-size:13px">
@@ -26,28 +20,26 @@
 
   <table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px;margin:18px -8px 6px">
     <tr>
-      {% for label, cur, prev, fmt in [
-          ('Toplam talep', s.total, pv.total, 'num'),
-          ('Pencere dışı', s.outside_window, pv.outside_window, 'num'),
-          ('Acil / kritik', s.emergency, pv.emergency, 'num'),
-          ('Medyan planlama', s.median_lead_hours, pv.median_lead_hours, 'hours')] %}
+      {% for label, cur, fmt in [
+          ('Toplam talep', s.total, 'num'),
+          ('Pencere dışı', s.outside_window, 'num'),
+          ('Acil / kritik', s.emergency, 'num'),
+          ('Medyan planlama', s.median_lead_hours, 'hours')] %}
       <td style="border:1px solid {{ line }};border-radius:10px;padding:12px 14px;width:25%;vertical-align:top">
         <div style="font-size:12px;color:{{ ink2 }}">{{ label }}</div>
         <div style="font-size:26px;font-weight:650;margin:2px 0">{% if fmt == 'hours' %}{{ cur|hours }}{% else %}{{ cur|num }}{% endif %}</div>
-        {{ delta(cur, prev, fmt) }}
       </td>
       {% endfor %}
     </tr>
     <tr>
-      {% for label, cur, prev, fmt in [
-          ('Medyan çözüm süresi', s.median_resolution_hours, pv.median_resolution_hours, 'hours'),
-          ('Geriye dönük kayıt', s.retroactive, pv.retroactive, 'num'),
-          ('Açık talep', s.open, pv.open, 'num'),
-          ('Etkilenen uygulama', s.applications, pv.applications, 'num')] %}
+      {% for label, cur, fmt in [
+          ('Medyan çözüm süresi', s.median_resolution_hours, 'hours'),
+          ('Geriye dönük kayıt', s.retroactive, 'num'),
+          ('Açık talep', s.open, 'num'),
+          ('Etkilenen uygulama', s.applications, 'num')] %}
       <td style="border:1px solid {{ line }};border-radius:10px;padding:12px 14px;width:25%;vertical-align:top">
         <div style="font-size:12px;color:{{ ink2 }}">{{ label }}</div>
         <div style="font-size:26px;font-weight:650;margin:2px 0">{% if fmt == 'hours' %}{{ cur|hours }}{% else %}{{ cur|num }}{% endif %}</div>
-        {{ delta(cur, prev, fmt) }}
       </td>
       {% endfor %}
     </tr>

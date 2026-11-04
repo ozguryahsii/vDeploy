@@ -6,17 +6,19 @@
   <a class="btn primary" href="/changes/new">+ Yeni talep</a>
 </div>
 <form class="filters" method="get">
-  <input type="search" name="q" value="{{ q }}" placeholder="Jira no, özet, uygulama, mikroservis, kişi…" style="min-width:280px">
-  <select name="request_type"><option value="">Tüm tipler</option>{% for t in types %}<option {{ 'selected' if t == request_type }}>{{ t }}</option>{% endfor %}</select>
-  <select name="outcome"><option value="">Tüm sonuçlar</option>{% for k, v in OUTCOMES.items() %}<option value="{{ k }}" {{ 'selected' if k == outcome }}>{{ v }}</option>{% endfor %}</select>
-  <select name="only">
-    <option value="">Hepsi</option>
-    <option value="outside" {{ 'selected' if only == 'outside' }}>Pencere dışı</option>
-    <option value="emergency" {{ 'selected' if only == 'emergency' }}>Acil</option>
-    <option value="open" {{ 'selected' if only == 'open' }}>Açık</option>
-  </select>
+  {% for k, v in hidden.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  <input type="search" name="q" value="{{ f.q }}" placeholder="Jira no, özet, uygulama, mikroservis, kişi…" style="min-width:280px">
+  <select name="request_type"><option value="">Tüm tipler</option>{% for t in types %}<option {{ 'selected' if t == f.request_type }}>{{ t }}</option>{% endfor %}</select>
+  <select name="outcome"><option value="">Tüm sonuçlar</option>{% for k, v in OUTCOMES.items() %}<option value="{{ k }}" {{ 'selected' if k == f.outcome }}>{{ v }}</option>{% endfor %}</select>
+  <select name="only"><option value="">Hepsi</option>{% for k, v in only_labels.items() %}<option value="{{ k }}" {{ 'selected' if k == f.only }}>{{ v }}</option>{% endfor %}</select>
   <button class="btn" type="submit">Filtrele</button>
 </form>
+{% if chips %}
+<div class="chips">
+  {% for c in chips %}<a class="chip" href="{{ c.remove }}" title="Bu filtreyi kaldır"><span class="muted">{{ c.label }}:</span> {{ c.value }} <b aria-hidden="true">×</b></a>{% endfor %}
+  <a href="/changes" class="hint">Tümünü temizle</a>
+</div>
+{% endif %}
 <div class="card" style="padding:0">
   <div class="table-wrap"><table>
     <thead><tr><th>Jira</th><th>Özet</th><th>Tip</th><th>Uygulama</th><th>Talep eden</th><th>Oluşturma</th><th>Planlanan deploy</th><th>Durum</th><th>Sonuç</th></tr></thead>

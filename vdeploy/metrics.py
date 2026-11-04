@@ -191,3 +191,102 @@ def delta(current: float | None, previous: float | None) -> dict:
         return {"diff": None, "direction": "flat"}
     diff = round(current - previous, 1)
     return {"diff": diff, "direction": "up" if diff > 0 else "down" if diff < 0 else "flat"}
+
+
+# ---------- liste filtreleri (grafiklere tıklanınca kullanılır) ----------
+NONE = "__none__"  # "Belirtilmemiş" / "Atanmamış" çubukları için
+ONLY_LABELS = {
+    "outside": "Pencere dışı",
+    "inside": "Pencere içi",
+    "emergency": "Acil",
+    "open": "Açık",
+    "retroactive": "Geriye dönük kayıt",
+    "no_test": "Test yapılamıyor",
+    "db": "DB yapısal değişiklik",
+    "vendor": "Vendor'lu",
+}
+FILTER_LABELS = {
+    "start": "Başlangıç", "end": "Bitiş", "request_type": "Talep tipi", "application": "Uygulama",
+    "microservice": "Mikroservis", "department": "Departman", "assignee": "Uygulayan", "requester": "Talep eden",
+    "lead": "Planlama süresi", "dow": "Gün", "hour": "Saat", "only": "Durum", "outcome": "Sonuç", "q": "Arama",
+}
+FILTER_KEYS = tuple(FILTER_LABELS)
+
+
+def _match(value: str | None, wanted: str) -> bool:
+    return value in (None, "") if wanted == NONE else value == wanted
+
+
+def lead_bucket(c: ChangeRequest) -> str | None:
+    h = lead_hours(c)
+    if h is None:
+        return None
+    for label, lo, hi in LEAD_BUCKETS:
+        if (lo is None or h >= lo) and (hi is None or h < hi):
+            return label
+    return None
+
+
+def filter_changes(rows: list[ChangeRequest], f: dict[str, str], window: Window) -> list[ChangeRequest]:
+    from datetime import date as _date
+
+    def d(key):
+        try:
+            return _date.fromisoformat(f[key]) if f.get(key) else None
+        except ValueError:
+            return None
+
+    start, end = d("start"), d("end")
+    out = []
+    q = (f.get("q") or "").casefold()
+    for c in rows:
+        ref = c.ref_date.date()
+        if start and ref < start or end and ref > end:
+            continue
+        if f.get("request_type") and not _match(c.request_type, f["request_type"]):
+            continue
+        if f.get("application") and not _match(c.application, f["application"]):
+            continue
+        if f.get("department") and not _match(c.department, f["department"]):
+            continue
+        if f.get("assignee") and not _match(c.assignee, f["assignee"]):
+            continue
+        if f.get("requester") and not _match(c.requester, f["requester"]):
+            continue
+        if f.get("microservice"):
+            ms = c.microservice_list
+            if (f["microservice"] == NONE and ms) or (f["microservice"] != NONE and f["microservice"] not in ms):
+                continue
+        if f.get("outcome") and c.outcome != f["outcome"]:
+            continue
+        if f.get("lead") and lead_bucket(c) != f["lead"]:
+            continue
+        t = deploy_time(c)
+        if f.get("dow", "").isdigit() and (t is None or t.weekday() != int(f["dow"])):
+            continue
+        if f.get("hour", "").isdigit() and (t is None or t.hour != int(f["hour"])):
+            continue
+        only = f.get("only")
+        if only == "outside" and not outside_window(c, window):
+            continue
+        if only == "inside" and (t is None or outside_window(c, window)):
+            continue
+        if only == "emergency" and not c.is_emergency:
+            continue
+        if only == "open" and c.is_closed:
+            continue
+        if only == "retroactive" and not ((lead_hours(c) or 0) < 0):
+            continue
+        if only == "no_test" and not (c.pre_test_possible is False or c.post_test_possible is False):
+            continue
+        if only == "db" and not c.db_structural_change:
+            continue
+        if only == "vendor" and not c.vendor:
+            continue
+        if q:
+            hay = " ".join(filter(None, [c.jira_key, c.summary, c.application, c.microservices, c.requester,
+                                         c.assignee, c.department, c.tag])).casefold()
+            if q not in hay:
+                continue
+        out.append(c)
+    return out

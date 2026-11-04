@@ -14,5 +14,9 @@
     <button class="btn primary" type="submit" {{ 'disabled title="Önce Ayarlar > E-posta ekranını doldurun"'|safe if not mail_ready }}>E-posta ile gönder</button>
   </form>
 </div>
-<div class="report-frame">{% include "report_body.html" %}</div>
+{% include "report_view.html" %}
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', path='report.js') }}?v={{ version }}"></script>
 {% endblock %}

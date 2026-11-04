@@ -58,7 +58,7 @@
 </div>
 
 <div class="card">
-  <div class="chart-head"><h2>Haftalık talep sayısı · talep tipine göre</h2><span class="hint">Hafta başlangıcı (Pazartesi)</span></div>
+  <div class="chart-head"><h2>Haftalık talep sayısı · talep tipine göre</h2><span class="hint">Çubuğa tıklayın → o haftanın talepleri</span></div>
   <div class="legend" id="weeklyLegend"></div>
   <div class="chart-box tall"><canvas id="weekly" role="img" aria-label="Haftalık talep sayısı, talep tipine göre yığılmış"></canvas></div>
 </div>
@@ -77,8 +77,8 @@
 </div>
 
 <div class="grid g2" style="margin-top:16px">
-  <div class="card"><h2>Uygulama bazında (ilk 10)</h2><div class="chart-box"><canvas id="application"></canvas></div></div>
-  <div class="card"><h2>Mikroservis bazında (ilk 10)</h2><div class="chart-box"><canvas id="microservice"></canvas></div></div>
+  <div class="card"><div class="chart-head"><h2>Uygulama bazında (ilk 10)</h2><span class="hint">Tıklanabilir</span></div><div class="chart-box"><canvas id="application"></canvas></div></div>
+  <div class="card"><div class="chart-head"><h2>Mikroservis bazında (ilk 10)</h2><span class="hint">Tıklanabilir</span></div><div class="chart-box"><canvas id="microservice"></canvas></div></div>
   <div class="card"><h2>Talep tipi</h2><div class="chart-box"><canvas id="request_type"></canvas></div></div>
   <div class="card">
     <div class="chart-head"><h2>Planlama süresi dağılımı</h2><span class="hint">Talep açılışı → planlanan deploy</span></div>
@@ -122,6 +122,7 @@
 <script>
   window.VDEPLOY = {{ bd_json|safe }};
   window.VDEPLOY_WINDOW = {{ {'days': window.days|list, 'start': window.start.hour, 'end': window.end.hour}|tojson }};
+  window.VDEPLOY_BASE = {{ {'start': period.start.isoformat(), 'end': period.end.isoformat(), 'request_type': filters.request_type, 'department': filters.department, 'application': filters.application}|tojson }};
 </script>
 <script src="{{ url_for('static', path='dashboard.js') }}?v={{ version }}"></script>
 {% endif %}
